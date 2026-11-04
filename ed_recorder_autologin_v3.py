@@ -70,67 +70,126 @@ def flush():
     (OUT / "index.json").write_text(json.dumps(S.index, ensure_ascii=False, indent=1), "utf-8")
 
 
+async def check_and_dismiss_already_logged_in(page):
+    """Kiểm tra và click ngay nút chiếm phiên nếu popup #confirmModal đang hiển thị."""
+    msg = page.get_by_text("You are already logged in").first
+    modal = page.locator("#confirmModal, .layout__confirmModal, .confirmPopup__main").first
+    btn = page.locator("#btnOk, button:has-text('Login on This Device'), [name='Login on This Device']").first
+
+    try:
+        is_msg = await msg.is_visible()
+        is_modal = await modal.is_visible()
+        is_btn = await btn.is_visible()
+        if is_msg or is_modal or is_btn:
+            print("Tài khoản đang đăng nhập ở thiết bị khác -> chiếm phiên trên máy này.")
+            await page.wait_for_timeout(400)
+            try:
+                await btn.click(timeout=2000, force=True)
+            except Exception:
+                await page.evaluate("() => { const b = document.getElementById('btnOk') || document.querySelector('.layout__confirmModal #btnOk'); if (b) b.click(); }")
+            await page.wait_for_timeout(1000)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+async def handle_post_conflict(page):
+    """Chờ Angular xử lý đồng bộ phiên sau khi chiếm phiên."""
+    try:
+        await page.wait_for_url(lambda u: "login" not in u.lower(), timeout=15000)
+    except Exception:
+        pass
+    await asyncio.sleep(2)
+    try:
+        await page.wait_for_load_state("networkidle", timeout=8000)
+    except Exception:
+        pass
+    print("Đã chiếm phiên và đăng nhập tự động thành công.")
+
+
 async def auto_login(page, cfg):
     user, pwd = cfg.username, cfg.password
     if not user or not pwd:
         print("Không có ED_USERNAME/ED_PASS, hãy đăng nhập tay.")
         return
+
+    # 1. Kiểm tra NGAY TỪ ĐẦU nếu popup 'You are already logged in...' (#confirmModal) đang hiển thị sẵn
+    if await check_and_dismiss_already_logged_in(page):
+        await handle_post_conflict(page)
+        return
+
     try:
         # :visible để bỏ qua các ô password ẩn chống autofill của trang
         pw_input = page.locator("input[type=password]:visible").first
         await pw_input.wait_for(state="visible", timeout=10000)
     except Exception:
+        # Nếu không thấy form login, có thể popup chiếm phiên vừa xuất hiện
+        if await check_and_dismiss_already_logged_in(page):
+            await handle_post_conflict(page)
+            return
         print("Không thấy form đăng nhập (có thể đã đăng nhập sẵn).")
         return
+
     user_input = page.locator(
         "input[type=text]:visible, input[type=email]:visible, input:not([type]):visible").first
     await user_input.fill(user)
     await pw_input.fill(pwd)
-    await page.get_by_role("button", name="Login", exact=True).click()
 
-    # Nếu tài khoản đang treo ở máy khác, web hiện popup "You are already logged in..."
-    # -> bấm "Login on This Device" (#btnOk) để đăng nhập lại trên máy này.
-    # Vòng lặp dừng ngay khi popup xuất hiện hoặc khi đã rời trang login.
-    await handle_already_logged_in(page)
+    # 2. Trước khi bấm nút Login, kiểm tra lại nếu popup vừa xuất hiện đè lên form
+    if await check_and_dismiss_already_logged_in(page):
+        await handle_post_conflict(page)
+        return
 
-    await page.wait_for_load_state("networkidle")
-    print("Đã đăng nhập tự động.")
+    # 3. Bấm nút Login an toàn (dùng force hoặc JS click nếu bị chặn pointer)
+    try:
+        await page.get_by_role("button", name="Login", exact=True).click(timeout=4000, force=True)
+    except Exception:
+        if await check_and_dismiss_already_logged_in(page):
+            await handle_post_conflict(page)
+            return
+        try:
+            await page.locator("#submit1, input[type=submit][value='Login']").first.evaluate("e => e.click()")
+        except Exception:
+            pass
+
+    # 4. Nếu sau khi bấm Login mới hiện popup "You are already logged in..."
+    conflict = await handle_already_logged_in(page)
+    if conflict:
+        await handle_post_conflict(page)
+    else:
+        await page.wait_for_load_state("networkidle")
+        print("Đã đăng nhập tự động.")
 
 
 async def handle_already_logged_in(page, timeout_ms=30000):
     """Chờ popup 'You are already logged in...' rồi bấm 'Login on This Device'.
     Dừng sớm nếu đã rời trang login (không có popup)."""
-    msg = page.get_by_text("You are already logged in").first
-    btn = page.get_by_role("button", name="Login on This Device").first
     waited = 0
     while waited < timeout_ms:
-        if await msg.is_visible():
-            print("Tài khoản đang đăng nhập ở thiết bị khác -> chiếm phiên trên máy này.")
-            await page.wait_for_timeout(500)  # chờ animation của popup xong
-            try:
-                await btn.click(timeout=3000)
-            except Exception as e:
-                print(f"   click thường lỗi ({type(e).__name__}), thử click bằng JS")
-                await page.evaluate("document.getElementById('btnOk').click()")
-            await page.wait_for_timeout(1000)
+        if await check_and_dismiss_already_logged_in(page):
             return True
-        if "login" not in page.url:
+        if "login" not in page.url.lower():
             return False
         await page.wait_for_timeout(300)
         waited += 300
-    print("Không thấy popup 'already logged in' sau 30s (có thể đăng nhập sai hoặc mạng chậm).")
+    print("Không thấy popup 'already logged in' sau thời gian chờ (có thể đăng nhập sai hoặc mạng chậm).")
     return False
 
 
 async def goto_course(page, cfg):
     # chờ đăng nhập xong (URL không còn chứa "login") rồi mới chuyển khoá
     try:
-        await page.wait_for_url(lambda u: "login" not in u, timeout=15000)
+        await page.wait_for_url(lambda u: "login" not in u.lower(), timeout=15000)
     except Exception:
         print("Cảnh báo: vẫn chưa thoát khỏi trang login, kiểm tra lại đăng nhập.")
     url = cfg.course_url()
+    await asyncio.sleep(1)
     await page.goto(url)
-    await page.wait_for_load_state("networkidle")
+    try:
+        await page.wait_for_load_state("networkidle", timeout=10000)
+    except Exception:
+        pass
     print(f"Đã chuyển đến khoá {cfg.course}: {url}")
 
 

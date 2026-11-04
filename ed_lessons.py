@@ -19,8 +19,14 @@
 #   - Bản dịch VI không có tên người nói, nên được ghép theo thứ tự câu với bản EN
 #     (ưu tiên 1 dòng VI = 1 lượt nói nếu số dòng khớp; nếu không thì căn câu theo độ dài).
 # """
-import argparse, csv, html, json, math, re, shutil
+import argparse, csv, html, json, math, re, shutil, sys
 from pathlib import Path
+
+# Đảm bảo in tiếng Việt / Unicode không lỗi trên console Windows
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 GETITEM = re.compile(r"GetItem/(\d+)/([A-Za-z0-9_]+)/(\d+)/(\d+)/(\d+)")
 CODE = re.compile(r"^(.*?)([pt])(\d+)$")
@@ -282,18 +288,80 @@ def pick_video(media, code):
     return max(pref or pool, key=lambda m: m[0].stat().st_size)[0]
 
 
+def count_questions_in_txt(txt_path):
+    """Đếm số câu hỏi [code] đã có trong file txt đích."""
+    if not txt_path.exists():
+        return 0
+    try:
+        content = txt_path.read_text("utf-8", errors="replace")
+        return len(re.findall(r"^\[[a-zA-Z0-9]+\]$", content, flags=re.MULTILINE))
+    except Exception:
+        return 0
+
+
 def build(folder, outdir, move, per_sentence, used, force=False):
     base = re.sub(r"^\d+_", "", folder.name)
-    if not force and base not in used and (outdir / f"{base}.txt").exists():
-        print(f"- {base}: đã có trong {outdir.name}, bỏ qua (dùng --force để làm lại)")
-        return None
+    target_txt = outdir / f"{base}.txt"
+
     items, media, en, vi = load(folder)
+    codes = sorted(items) or [""]
+    code = codes[0]
+
+    # Tổng số câu hỏi phân loại được trong bản ghi
+    new_questions = sum(
+        1 for lesson in codes
+        for kind in ("p", "t")
+        for c in items.get(lesson, {})
+        if CODE.match(c) and CODE.match(c).group(2) == kind
+    )
+
+    # Kiểm tra thông minh: có cần làm lại / cập nhật bài này không?
+    if not force and base not in used and target_txt.exists():
+        old_count = count_questions_in_txt(target_txt)
+
+        # 1. Thời gian sửa đổi mới nhất trong thư mục ghi (network_log, meta.json)
+        src_files = [folder / "network_log.json"]
+        if (folder / "meta.json").exists():
+            src_files.append(folder / "meta.json")
+        src_mtime = max(p.stat().st_mtime for p in src_files if p.exists())
+        tgt_mtime = target_txt.stat().st_mtime
+
+        # 2. Kiểm tra video
+        video = pick_video(media, code)
+        target_video = (outdir / f"{base}{video.suffix}") if video else None
+        video_missing = bool(video and (not target_video.exists() or target_video.stat().st_size == 0))
+
+        # 3. Kiểm tra bài đọc / dịch song ngữ
+        en_p, vi_p = pick(en, code), pick(vi, code)
+        has_bilingual_src = bool((main_text(en_p) if en_p else "") or (main_text(vi_p) if vi_p else ""))
+        try:
+            old_txt_content = target_txt.read_text("utf-8", errors="replace")
+        except Exception:
+            old_txt_content = ""
+        text_missing = has_bilingual_src and ("==== NỘI DUNG BÀI (EN | VI) ====" not in old_txt_content)
+
+        reasons = []
+        if new_questions > old_count:
+            reasons.append(f"thêm câu hỏi ({old_count} -> {new_questions})")
+        if src_mtime > tgt_mtime + 2.0:
+            reasons.append("dữ liệu ghi mới hơn")
+        if video_missing:
+            reasons.append("thiếu video")
+        if text_missing:
+            reasons.append("thiếu bài đọc/dịch")
+
+        if not reasons:
+            used.add(base)
+            print(f"- {base}: đã có trong {outdir.name} ({old_count} câu, đầy đủ), bỏ qua (dùng --force để làm lại)")
+            return None
+        else:
+            print(f"-> [Cập nhật] {base}: {', '.join(reasons)}...")
+
     k, name = 2, base
     while name in used:
         name, k = f"{base}_{k}", k + 1
     used.add(name)
-    codes = sorted(items) or [""]
-    code = codes[0]
+
     en_p, vi_p = pick(en, code), pick(vi, code)
     en_t, vi_t = (main_text(en_p) if en_p else ""), (main_text(vi_p) if vi_p else "")
     video = pick_video(media, code)
@@ -303,7 +371,10 @@ def build(folder, outdir, move, per_sentence, used, force=False):
     if video:
         vname = f"{name}{video.suffix}"
         dst = outdir / vname
-        (shutil.move if move else shutil.copy2)(str(video), str(dst))
+        if move:
+            shutil.move(str(video), str(dst))
+        elif not dst.exists() or dst.stat().st_size != video.stat().st_size:
+            shutil.copy2(str(video), str(dst))
         txt.append(f"Video kèm theo: {vname}")
     else:
         txt.append("Video kèm theo: (không có - bài này chưa ghi được video)")
@@ -331,7 +402,7 @@ def build(folder, outdir, move, per_sentence, used, force=False):
                     else: txt.append(f"  {b[1]}")
                 txt.append("")
     (outdir / f"{name}.txt").write_text("\n".join(txt), "utf-8")
-    n_items = sum(len(v) for d in items.values() for v in d.values())
+    n_items = new_questions
     print(f"✓ {name}.txt  | video: {vname or 'không'} | {n_items} câu | nội dung: {note}")
     return [name, code, vname or "", n_items, bool(en_t), bool(vi_t), note]
 

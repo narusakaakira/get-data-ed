@@ -1,41 +1,43 @@
-﻿# get_data_flow.ps1 - chạy cả quy trình: ghi dữ liệu -> xuất txt + video theo lesson.
+# get_data_flow.ps1 - chay ca quy trinh: ghi du lieu -> xuat txt + video theo lesson.
 
-# Ví dụ:
-#   .\get_data_flow.ps1                              # dùng toàn bộ cấu hình trong .env
-#   .\get_data_flow.ps1 --course I2                  # đổi khóa cho lần chạy này
+# Vi du:
+#   .\get_data_flow.ps1                              # dung toan bo cau hinh trong .env
+#   .\get_data_flow.ps1 --course I2                  # doi khoa cho lan chay nay
 #   .\get_data_flow.ps1 --course I3 --targets "U02-L01..L03"
-#   .\get_data_flow.ps1 --manual                     # ép chế độ thủ công (tự gõ nhãn)
-#   .\get_data_flow.ps1 -NoExport                    # chỉ ghi, chưa xuất txt/video
+#   .\get_data_flow.ps1 --course I3 --targets "U01-L01" --redo
+#   .\get_data_flow.ps1 --manual                     # ep che do thu cong (tu go nhan)
+#   .\get_data_flow.ps1 -NoExport                    # chi ghi, chua xuat txt/video
+#   .\get_data_flow.ps1 -Force                       # lam lai ca cac bai da co trong lessons
 
-# .env KHÔNG còn được nạp ở đây: ed_config.py (Python) tự đọc, nên chạy trực tiếp
-# `python ed_recorder_autologin.py ...` cũng cho kết quả giống hệt. Chỉ có MỘT bộ đọc .env duy nhất.
-
-
-param([switch]$NoExport)
+param([switch]$NoExport, [switch]$Force)
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-if (-not (Test-Path ".env")) { throw "Không thấy file .env - sao chép .env.example thành .env rồi điền thông tin." }
+if (-not (Test-Path ".env")) { throw "Khong thay file .env - hay sao chep .env.example thanh .env roi dien thong tin." }
 
-# Ưu tiên môi trường ảo .venv nếu có
+# Uu tien moi truong ao .venv neu co
 $py = if (Test-Path ".\.venv\Scripts\python.exe") { ".\.venv\Scripts\python.exe" } else { "python" }
-if (-not (Get-Command $py -ErrorAction SilentlyContinue)) { throw "Không tìm thấy Python ($py)." }
+if (-not (Get-Command $py -ErrorAction SilentlyContinue)) { throw "Khong tim thay Python ($py)." }
 
 New-Item -ItemType Directory -Force -Path "logs" | Out-Null
 $log = "logs\run_{0:yyyyMMdd_HHmmss}.log" -f (Get-Date)
-Start-Transcript -Path $log | Out-Null   # nhật ký mỗi lần chạy (không chứa mật khẩu: Python không in nó)
+Start-Transcript -Path $log | Out-Null
 
 try {
     & $py ed_recorder_autologin_v3.py @args
-    if ($LASTEXITCODE -ne 0) { throw "ed_recorder_autologin_v3.py kết thúc với mã lỗi $LASTEXITCODE" }
+    if ($LASTEXITCODE -ne 0) { throw "ed_recorder_autologin_v3.py ket thuc voi ma loi $LASTEXITCODE" }
 
     if (-not $NoExport -and (Test-Path "out/record")) {
-        Write-Host "`n== Xuất txt + video theo lesson =="
-        & $py ed_lessons.py out/record
-        if ($LASTEXITCODE -ne 0) { throw "ed_lessons.py kết thúc với mã lỗi $LASTEXITCODE" }
+        Write-Host "`n== Xuat txt + video theo lesson =="
+        $lessonArgs = @("out/record")
+        if ($Force -or ($args -contains "--redo") -or ($args -contains "-redo")) {
+            $lessonArgs += "--force"
+        }
+        & $py ed_lessons.py @lessonArgs
+        if ($LASTEXITCODE -ne 0) { throw "ed_lessons.py ket thuc voi ma loi $LASTEXITCODE" }
     }
-    Write-Host "`nXong. Nhật ký: $log"
+    Write-Host "`nXong. Nhat ky: $log"
 }
 finally {
     Stop-Transcript | Out-Null

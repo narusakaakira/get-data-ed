@@ -1,0 +1,18 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20261104233115
+Username: AKIRA\akira
+RunAs User: AKIRA\akira
+Configuration Name: 
+Machine: AKIRA (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -File .\get_data_flow.ps1 --dry-run
+Process ID: 7172
+PSVersion: 5.1.26100.9711
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9711
+BuildVersion: 10.0.26100.9711
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************

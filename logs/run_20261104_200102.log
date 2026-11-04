@@ -1,0 +1,76 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20261104200102
+Username: AKIRA\akira
+RunAs User: AKIRA\akira
+Configuration Name: 
+Machine: AKIRA (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+Process ID: 17116
+PSVersion: 5.1.26100.9711
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9711
+BuildVersion: 10.0.26100.9711
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+   + data   i3ltafe_vie.js
+   + image  reading_icons.svg
+   + media  i3ltafe.mp4
+   + image  playersoverlayicons.svg
+     #001 [next] Step 1: Explore | Back Next 1 / 1 | +2 req
+     #002 [next] Step 2: Practice | Back Next Intro | +1 req
+   �� snap02: 1 khung
+   + data   5
+   + image  learning__practicetools.svg
+     #003 [next] Step 2: Practice | Back Next 1 / 7 | +2 req
+   + data   7
+     #004 [next] Step 2: Practice | Back Next 2 / 7 | +1 req
+   + data   7
+     #005 [next] Step 2: Practice | Back Next 3 / 7 | +2 req
+   + data   7
+     #006 [next] Step 2: Practice | Back Next 4 / 7 | +1 req
+   + data   7
+     #007 [next] Step 2: Practice | Back Next 5 / 7 | +1 req
+   + data   7
+     #008 [next] Step 2: Practice | Back Next 6 / 7 | +1 req
+   + data   7
+     #009 [next] Step 2: Practice | Back Next 7 / 7 | +2 req
+   + image  bgtestopening.jpg
+     #010 [next] Step 3: Test |  | +0 req
+   �� snap03: 1 khung
+     #011 [Start Test] Bắt đầu bài kiểm tra...
+   + data   2
+     #011 [start_test] Step 3: Test | Back Next 1 / 5 | +2 req
+   �� snap04: 1 khung
+   + data   2
+     #012 [next] Step 3: Test | Back Next 2 / 5 | +2 req
+   �� snap05: 1 khung
+   + data   2
+     #013 [next] Step 3: Test | Back Next 3 / 5 | +1 req
+   �� snap06: 1 khung
+   + data   2
+     #014 [next] Step 3: Test | Back Next 4 / 5 | +1 req
+   �� snap07: 1 khung
+   + data   2
+     #015 [next] Step 3: Test | Back Submit 5 / 5 | +2 req
+   �� snap08: 1 khung
+     #016 [Submit] Bấm nút Submit nộp bài Test...
+   �� snap09: 1 khung
+     Đang chờ hộp thoại double check xác nhận nộp bài...
+     (Không thấy DOM modal xác nhận hoặc đã được xử lý qua browser dialog).
+   �� snap10: 2 khung
+   → ok: đã hoàn thành bài Test và nộp bài thành công
+
+== Xong: 1 ok, 0 một phần, 0 lỗi, 0 bỏ qua. Báo cáo: out\record\auto_report.json
+
+== Xuất txt + video theo lesson ==
+
+
+Xong. Nhật ký: logs\run_20261104_200102.log
+**********************
+Windows PowerShell transcript end
+End time: 20261104200236
+**********************

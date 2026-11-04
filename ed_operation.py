@@ -35,7 +35,11 @@ SEL_LESSONS_OPEN = ".myProgress__unitLessons"           # chỉ tồn tại khi 
 SEL_LESSON = ".myProgress__unitLesson:not(.myProgress__unitTest):not(.myProgress__unitReflection)"
 SEL_LESSON_NAME = ".myProgress__unitLesson_name"
 SEL_STEP_BTN = ".myProgress__unitLesson_stepIW"        # cả 3 ô step đều gọi gotoLesson -> bấm ô đầu là đủ
-NEXT_SEL = "#learning__nextItem a, a.learning__nextItemLink"
+
+# Nút điều hướng bài học
+NEXT_SEL = "#learning_nextItem a, #learning__nextItem a, a.learning_nextItemLink, .learning_nextItem a, a.tasksBInext:not(.learning_submitTestLink)"
+START_TEST_SEL = "a.btnStartTest, .btnStartTest, #testIntro a, a.layout__roundBtn.btnStartTest, a.layout_roundBtn.btnStartTest"
+SUBMIT_TEST_SEL = "#learning_submitTestItem a, #learning__submitTestItem a, a.learning_submitTestLink, .learning_submitTestItem a"
 
 CODE = re.compile(r"^(.*?)([pt])(\d+)$")
 LESSON_JS = re.compile(r"/Runtime/Lessons/([A-Za-z0-9_]+)\.js", re.I)
@@ -50,12 +54,22 @@ STATE_JS = r"""() => {
   const flags = {};
   if (tm) for (const a of tm.attributes) if (a.name.startsWith('ng-reflect-')) flags[a.name.slice(11)] = a.value.slice(0, 100);
   const bar = document.querySelector('.learning__practiceToolsOW');
-  const nx = document.querySelector('#learning__nextItem a, a.learning__nextItemLink');
+  const nx = document.querySelector('#learning_nextItem a, #learning__nextItem a, a.learning_nextItemLink, .learning_nextItem a');
+  const st = document.querySelector('a.btnStartTest, .btnStartTest, #testIntro a');
+  const sm = document.querySelector('#learning_submitTestItem a, #learning__submitTestItem a, a.learning_submitTestLink, .learning_submitTestItem a');
+  const counter = find(/^\d+\s*\/\s*\d+$/) || find(/\b\d+\s*\/\s*\d+\b/);
+  const qEl = document.querySelector('.prMCQ__questionText, .prMCQ__questionW, .learning__taskQuestion, .learning__question');
+  const qText = qEl ? qEl.innerText.trim().replace(/\s+/g, ' ').slice(0, 120) : null;
   return {
     lesson: find(/^Lesson \d+\s*:/), step: find(/^Step \d+\s*:/),
     bar: bar ? bar.innerText.trim().replace(/\s+/g, ' ').slice(0, 80) : null,
-    next_visible: nx ? vis(nx) : false, flags,
-    body_head: document.body.innerText.trim().replace(/\s+/g, ' ').slice(0, 140)
+    counter: counter,
+    question_text: qText,
+    next_visible: nx ? vis(nx) : false,
+    start_test_visible: st ? vis(st) : false,
+    submit_visible: sm ? vis(sm) : false,
+    flags,
+    body_head: document.body.innerText.trim().replace(/\s+/g, ' ').slice(0, 200)
   };
 }"""
 
@@ -126,7 +140,7 @@ def already_done(label):
 
 
 def fingerprint(st):
-    return (st.get("lesson"), st.get("step"), st.get("bar"), st.get("body_head"))
+    return (st.get("lesson"), st.get("step"), st.get("bar"), st.get("counter"), st.get("question_text"))
 
 
 # ---------- thao tác trên trang ----------
@@ -143,9 +157,38 @@ async def read_state(page):
     return best or {}
 
 
-async def open_progress(page, cfg):
-    await page.goto(cfg.course_url())
-    await page.wait_for_selector(SEL_UNIT, timeout=30000)
+async def open_progress(page, cfg, max_retries=3):
+    url = cfg.course_url()
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Điều hướng đến URL khóa học nếu chưa ở đó hoặc cần tải lại
+            if "myprogress" not in page.url.lower():
+                await page.goto(url)
+            else:
+                await page.goto(url)
+
+            # Chờ danh sách Unit xuất hiện (timeout 12s cho mỗi lần thử)
+            await page.locator(SEL_UNIT).first.wait_for(state="visible", timeout=12000)
+            await asyncio.sleep(1)
+            return
+        except Exception:
+            curr_url = page.url
+            print(f"  [Thử lại {attempt}/{max_retries}] Chưa thấy danh sách Unit (URL hiện tại: {curr_url}). Đang thử kết nối lại...")
+            # Nếu phát hiện bị văng về login (do thiết bị khác vừa chiếm lại)
+            if "login" in curr_url.lower():
+                print("  Phát hiện bị đưa về trang đăng nhập, tiến hành chiếm lại phiên...")
+                from ed_recorder_autologin_v3 import auto_login
+                await auto_login(page, cfg)
+            await asyncio.sleep(2)
+            try:
+                await page.goto(url)
+                await page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:
+                pass
+
+    # Lần cuối cùng: chờ tối đa 30s với URL gốc
+    await page.goto(url)
+    await page.locator(SEL_UNIT).first.wait_for(state="visible", timeout=30000)
     await asyncio.sleep(1)
 
 
@@ -197,7 +240,7 @@ async def wait_player(lp):
     for _ in range(80):
         try:
             st = await read_state(lp)
-            if st.get("lesson") or st.get("next_visible"):
+            if st.get("lesson") or st.get("next_visible") or st.get("start_test_visible") or st.get("submit_visible"):
                 return st
         except Exception:
             pass
@@ -205,8 +248,67 @@ async def wait_player(lp):
     return {}
 
 
+async def find_visible(page, selector):
+    """Tìm phần tử hiển thị đầu tiên khớp selector trên page hoặc bất kỳ frame con nào."""
+    for ctx in [page] + list(page.frames):
+        try:
+            loc = ctx.locator(selector).first
+            if await loc.count() > 0 and await loc.is_visible():
+                return loc
+        except Exception:
+            continue
+    return None
+
+
+async def handle_submit_confirmation(lp, timeout=6.0):
+    """Xử lý hộp thoại double check sau khi bấm Submit (DOM modal / popup xác nhận nộp bài)."""
+    t_end = time.time() + timeout
+    confirm_selectors = [
+        # Nút xác nhận trong modal Angular / Bootstrap
+        ".modal.show button:has-text('Submit')",
+        ".modal.show button:has-text('Yes')",
+        ".modal.show button:has-text('OK')",
+        ".modal.show button:has-text('Confirm')",
+        "ngb-modal-window button:has-text('Submit')",
+        "ngb-modal-window button:has-text('Yes')",
+        "ngb-modal-window button:has-text('OK')",
+        "ngb-modal-window button:has-text('Confirm')",
+        ".modal-dialog button:has-text('Submit')",
+        ".modal-dialog button:has-text('Yes')",
+        ".modal-dialog button:has-text('OK')",
+        "#BSModal button:has-text('OK')",
+        "#BSModal .btn-primary",
+        "button#btnOk",
+        ".modal-footer .btn-primary",
+        ".modal-footer button:not(.btn-secondary):not(.btn-cancel)",
+        # Thử tìm trực tiếp theo text nút hiển thị
+        "button:has-text('Submit'):visible",
+        "button:has-text('Yes'):visible",
+        "button:has-text('OK'):visible",
+        "a.btnOk:visible",
+        "a:has-text('OK'):visible",
+        "a:has-text('Yes'):visible",
+    ]
+    while time.time() < t_end:
+        for ctx in [lp] + list(lp.frames):
+            for sel in confirm_selectors:
+                try:
+                    btn = ctx.locator(sel).first
+                    if await btn.count() > 0 and await btn.is_visible():
+                        print(f"     ✓ Đã tìm thấy nút xác nhận hộp thoại nộp bài ({sel}), đang click...")
+                        try:
+                            await btn.click(timeout=2000)
+                        except Exception:
+                            await btn.evaluate("e => e.click()")
+                        return True
+                except Exception:
+                    pass
+        await asyncio.sleep(0.3)
+    return False
+
+
 async def walk(lp, rec, cfg):
-    """Bấm Next liên tục. Trả về (kind, lý do dừng, trace, thông tin phụ); kind = 'ok' (hết bài) hoặc 'partial'."""
+    """Bấm Next / Start Test / Submit liên tục. Trả về (kind, lý do dừng, trace, thông tin phụ); kind = 'ok' hoặc 'partial'."""
     S = rec.state
     max_clicks = int(os.environ.get("ED_MAX_CLICKS", "250"))
     tmax = float(os.environ.get("ED_LESSON_TIMEOUT", "1500"))
@@ -228,19 +330,87 @@ async def walk(lp, rec, cfg):
         if time.time() - t0 > tmax:
             reason = "quá thời gian ED_LESSON_TIMEOUT"
             break
-        if stop_test and st.get("flags", {}).get("is-step-test") == "true":
+        flags = st.get("flags", {})
+        if stop_test and flags.get("is-step-test") == "true":
             reason = "dừng ở bước Test (ED_STOP_AT_TEST=1)"
             break
-        nx = lp.locator(NEXT_SEL).first
-        try:
-            if await nx.count() == 0 or not await nx.is_visible():
-                reason = "không thấy nút Next (cuối bài hoặc màn hình nộp bài/kết quả)"
-                kind = "partial" if st.get("flags", {}).get("is-step-test") == "true" else "ok"
-                break
-            await nx.click(timeout=4000)
-        except Exception as e:
-            reason = f"không bấm được Next: {str(e)[:120]}"
+
+        # Kiểm tra nếu đã ở màn hình kết quả bài Test (đã nộp xong)
+        is_test_results = (flags.get("is-test-results") == "true" or
+                           any(k in (st.get("body_head") or "").lower() for k in ("test score", "your total score", "test results")))
+        if is_test_results:
+            reason, kind = "đã ở màn hình kết quả bài Test", "ok"
             break
+
+        # Tìm các nút điều hướng khả dụng: Start Test > Submit Test > Next
+        btn_start = await find_visible(lp, START_TEST_SEL)
+        btn_submit = await find_visible(lp, SUBMIT_TEST_SEL)
+        btn_next = await find_visible(lp, NEXT_SEL)
+
+        action_name = "next"
+        target_btn = None
+        if btn_start:
+            action_name = "start_test"
+            target_btn = btn_start
+        elif btn_submit:
+            action_name = "submit"
+            target_btn = btn_submit
+        elif btn_next:
+            action_name = "next"
+            target_btn = btn_next
+        else:
+            # Thử kiểm tra xem có modal xác nhận nào đang mở không
+            if await handle_submit_confirmation(lp, timeout=1.0):
+                await asyncio.sleep(cfg.delay)
+                continue
+            # Đợi một chút rồi thử lại một lần nữa phòng trường hợp web đang render/lag
+            await asyncio.sleep(1.5)
+            btn_start = await find_visible(lp, START_TEST_SEL)
+            btn_submit = await find_visible(lp, SUBMIT_TEST_SEL)
+            btn_next = await find_visible(lp, NEXT_SEL)
+            if btn_start:
+                action_name, target_btn = "start_test", btn_start
+            elif btn_submit:
+                action_name, target_btn = "submit", btn_submit
+            elif btn_next:
+                action_name, target_btn = "next", btn_next
+            else:
+                reason = "không thấy nút điều hướng (Next / Start Test / Submit)"
+                kind = "partial" if flags.get("is-step-test") == "true" and flags.get("is-test-results") != "true" else "ok"
+                break
+
+        try:
+            if action_name == "start_test":
+                print(f"     #{n:03d} [Start Test] Bắt đầu bài kiểm tra...")
+                await target_btn.click(timeout=4000)
+            elif action_name == "submit":
+                print(f"     #{n:03d} [Submit] Bấm nút Submit nộp bài Test...")
+                await rec.snapshot()  # chụp lại câu hỏi cuối trước khi submit
+                await target_btn.click(timeout=4000)
+
+                # Chờ và xử lý hộp thoại double check xác nhận nộp bài
+                print("     Đang chờ hộp thoại double check xác nhận nộp bài...")
+                confirmed = await handle_submit_confirmation(lp, timeout=6.0)
+                if confirmed:
+                    print("     ✓ Đã xác nhận nộp bài trên hộp thoại double check.")
+                else:
+                    print("     (Không thấy DOM modal xác nhận hoặc đã được xử lý qua browser dialog).")
+
+                # Chờ web ghi nhận kết quả và gửi dữ liệu mạng
+                await asyncio.sleep(max(cfg.delay, 3))
+                try:
+                    await lp.wait_for_load_state("networkidle", timeout=8000)
+                except Exception:
+                    pass
+                await rec.snapshot()  # chụp màn hình kết quả sau khi nộp bài
+                reason, kind = "đã hoàn thành bài Test và nộp bài thành công", "ok"
+                break
+            else:
+                await target_btn.click(timeout=4000)
+        except Exception as e:
+            reason = f"không bấm được {action_name}: {str(e)[:120]}"
+            break
+
         await asyncio.sleep(cfg.delay)
         try:
             await lp.wait_for_load_state("networkidle", timeout=6000)
@@ -254,17 +424,21 @@ async def walk(lp, rec, cfg):
         except Exception as e:
             reason = f"mất trang sau khi bấm: {str(e)[:100]}"
             break
+
         prev_mark = mark
         new, mark = S.reqs[prev_mark:], len(S.reqs)
         codes = codes_in(new)
         cur_code = cur_code or next(iter(codes), None)
         fp = fingerprint(st)
-        changed = fp != last
-        no_change = 0 if changed else no_change + 1
-        step_changed = st.get("step") != trace[-1]["step"]
-        trace.append({"n": n, "lesson": st.get("lesson"), "step": st.get("step"), "bar": st.get("bar"),
-                      "flags": st.get("flags"), "codes": sorted(set(codes)), "changed": changed})
-        print(f"     #{n:03d} {st.get('step')} | {st.get('bar')} | +{len(new)} req{'' if changed else '  (không đổi)'}")
+        has_new_reqs = len(new) > 0
+        changed = (fp != last) or has_new_reqs
+        no_change = 0 if (changed or action_name == "start_test") else no_change + 1
+        step_changed = st.get("step") != trace[-1].get("step")
+        in_test_step = st.get("flags", {}).get("is-step-test") == "true"
+        trace.append({"n": n, "action": action_name, "lesson": st.get("lesson"), "step": st.get("step"), "bar": st.get("bar"),
+                      "counter": st.get("counter"), "flags": st.get("flags"), "codes": sorted(set(codes)), "changed": changed})
+        disp_info = st.get('counter') or st.get('bar') or ''
+        print(f"     #{n:03d} [{action_name}] {st.get('step')} | {disp_info} | +{len(new)} req{'' if changed else '  (không đổi)'}")
 
         other = next((c for c in codes if cur_code and c != cur_code), None)
         label_changed = bool(init_lesson and st.get("lesson") and st["lesson"] != init_lesson)
@@ -283,10 +457,11 @@ async def walk(lp, rec, cfg):
         if no_change >= 3:
             reason = "Next không làm gì 3 lần liền (có thể đang chờ trả lời / nộp bài)"
             break
-        if step_changed:
-            await rec.snapshot()  # chụp chữ + HTML mỗi khi sang bước mới
+        if step_changed or action_name == "start_test" or in_test_step:
+            await rec.snapshot()  # chụp chữ + HTML mỗi khi sang bước mới hoặc mỗi câu trong bài test
         last = fp
-    if not info["changed_lesson"]:
+
+    if not info["changed_lesson"] and kind != "ok":
         await rec.snapshot()
     return kind, reason, trace, info
 
@@ -296,8 +471,9 @@ async def run_auto(ctx, page, cfg, rec):
     dialogs = []
 
     def on_dialog(d):
-        dialogs.append(d.message[:200])
-        asyncio.create_task(d.accept() if d.type == "beforeunload" else d.dismiss())  # beforeunload: phải accept mới rời trang
+        dialogs.append(f"{d.type}: {d.message[:200]}")
+        print(f"   [Dialog {d.type}] {d.message[:100]} -> tự động chấp nhận (accept)")
+        asyncio.create_task(d.accept())
 
     ctx.on("page", lambda p: p.on("dialog", on_dialog))
     for p in ctx.pages:

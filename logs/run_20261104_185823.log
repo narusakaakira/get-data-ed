@@ -1,0 +1,52 @@
+﻿5tgb **********************
+Windows PowerShell transcript start
+Start time: 20261104185823
+Username: AKIRA\akira
+RunAs User: AKIRA\akira
+Configuration Name: 
+Machine: AKIRA (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+Process ID: 17116
+PSVersion: 5.1.26100.9711
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9711
+BuildVersion: 10.0.26100.9711
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+     #001 Step 1: Explore | Back Next 1 / 1 | +3 req
+     #002 Step 2: Practice | Back Next Intro | +1 req
+   �� snap02: 1 khung
+   + image  learning__practicetools.svg
+   + data   5
+     #003 Step 2: Practice | Back Next 1 / 7 | +3 req
+   + data   7
+     #004 Step 2: Practice | Back Next 2 / 7 | +1 req
+   + data   7
+     #005 Step 2: Practice | Back Next 3 / 7 | +2 req
+   + data   7
+     #006 Step 2: Practice | Back Next 4 / 7 | +1 req
+   + data   7
+     #007 Step 2: Practice | Back Next 5 / 7 | +1 req
+   + data   7
+     #008 Step 2: Practice | Back Next 6 / 7 | +2 req
+   + data   7
+   + data   getuserwritings
+   + data   5235688
+   + data   57081
+     #009 Step 2: Practice | Back Next 7 / 7 | +10 req
+   + image  bgtestopening.jpg
+     #010 Step 3: Test | None | +0 req
+   �� snap03: 1 khung
+   �� snap04: 1 khung
+   → partial: không thấy nút Next (cuối bài hoặc màn hình nộp bài/kết quả)
+
+== Xong: 0 ok, 1 một phần, 0 lỗi, 0 bỏ qua. Báo cáo: out\record\auto_report.json
+
+Xong. Nhật ký: logs\run_20261104_185823.log
+**********************
+Windows PowerShell transcript end
+End time: 20261104185931
+**********************
