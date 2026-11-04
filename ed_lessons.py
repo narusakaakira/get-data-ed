@@ -1,24 +1,24 @@
-"""
-ed_lessons.py - từ các thư mục đã ghi bằng ed_recorder.py, tạo hàng loạt bộ "1 file txt + 1 video" cho từng lesson.
+# """
+# ed_lessons.py - từ các thư mục đã ghi bằng ed_recorder.py, tạo hàng loạt bộ "1 file txt + 1 video" cho từng lesson.
 
-Chạy:
-    python ed_lessons.py out/record                 # mọi thư mục nhãn -> out/lessons/
-    python ed_lessons.py out/record/001_I3-U02-L01-College_Sports   # chỉ 1 thư mục
-    python ed_lessons.py out/record --move          # chuyển (thay vì sao chép) file video
-    python ed_lessons.py out/record --sentences     # mỗi câu một dòng thay vì mỗi lượt nói một dòng
+# Chạy:
+#     python ed_lessons.py out/record                 # mọi thư mục nhãn -> out/lessons/
+#     python ed_lessons.py out/record/001_I3-U02-L01-College_Sports   # chỉ 1 thư mục
+#     python ed_lessons.py out/record --move          # chuyển (thay vì sao chép) file video
+#     python ed_lessons.py out/record --sentences     # mỗi câu một dòng thay vì mỗi lượt nói một dòng
 
-Kết quả: out/lessons/<nhãn>.txt và out/lessons/<nhãn>.mp4 (cùng tên -> mở cạnh nhau), kèm index.csv.
-Thêm bài mới: ghi bài bằng recorder rồi chạy lại lệnh trên. Bài đã có trong out/lessons được BỎ QUA (nhanh,
-không chép lại video); index.csv được gộp, không mất dòng cũ. Muốn làm lại một bài (vd ghi lại bằng recorder
-mới hơn) thì thêm --force.
+# Kết quả: out/lessons/<nhãn>.txt và out/lessons/<nhãn>.mp4 (cùng tên -> mở cạnh nhau), kèm index.csv.
+# Thêm bài mới: ghi bài bằng recorder rồi chạy lại lệnh trên. Bài đã có trong out/lessons được BỎ QUA (nhanh,
+# không chép lại video); index.csv được gộp, không mất dòng cũ. Muốn làm lại một bài (vd ghi lại bằng recorder
+# mới hơn) thì thêm --force.
 
-Nhận diện người nói:
-  - Tìm các nhãn dạng "Tên Nhân Vật:" (1-4 từ viết hoa + dấu hai chấm) trong văn bản EN, bất kể tên gì
-    (Carl Langford, Tina, Man, Woman, Dr. Smith...). Nhãn chỉ được tính là người nói khi xuất hiện đủ nhiều
-    (>= 2 tên khác nhau và >= 3 lần, hoặc 1 tên >= 4 lần); các nhãn như Note:, Example:, From:, Subject: bị loại.
-  - Bản dịch VI không có tên người nói, nên được ghép theo thứ tự câu với bản EN
-    (ưu tiên 1 dòng VI = 1 lượt nói nếu số dòng khớp; nếu không thì căn câu theo độ dài).
-"""
+# Nhận diện người nói:
+#   - Tìm các nhãn dạng "Tên Nhân Vật:" (1-4 từ viết hoa + dấu hai chấm) trong văn bản EN, bất kể tên gì
+#     (Carl Langford, Tina, Man, Woman, Dr. Smith...). Nhãn chỉ được tính là người nói khi xuất hiện đủ nhiều
+#     (>= 2 tên khác nhau và >= 3 lần, hoặc 1 tên >= 4 lần); các nhãn như Note:, Example:, From:, Subject: bị loại.
+#   - Bản dịch VI không có tên người nói, nên được ghép theo thứ tự câu với bản EN
+#     (ưu tiên 1 dòng VI = 1 lượt nói nếu số dòng khớp; nếu không thì căn câu theo độ dài).
+# """
 import argparse, csv, html, json, math, re, shutil
 from pathlib import Path
 

@@ -1,10 +1,15 @@
 # """
-# ed_recorder.py - chế độ "ghi hình": BẠN tự thao tác trên web như bình thường
+# ed_recorder_autologin.py - chế độ "ghi hình": BẠN tự thao tác trên web như bình thường
 # (đổi Intermediate 2/3, bấm từng lesson, từng step, bài test cuối unit...),
 # script chỉ lặng lẽ lưu audio/video/ảnh/JSON/XML và nội dung trang vào thư mục theo nhãn bạn gõ.
 
 # Cài đặt:  pip install playwright   rồi   playwright install chromium
-# Chạy:     python ed_recorder_autologin.py
+# Chạy:     .\\get_data_flow.ps1 [--I2 | --I3]
+#           (hoặc trực tiếp: python ed_recorder_autologin.py [--I2 | --I3])
+
+# Tham số:
+#     --I2   sau khi đăng nhập, tự chuyển tới Intermediate 2
+#     --I3   sau khi đăng nhập, tự chuyển tới Intermediate 3
 
 # Trong cửa sổ terminal:
 #     gõ một nhãn + Enter   -> bắt đầu thư mục mới, vd:  I2-U02-L01-Be Careful
@@ -13,13 +18,23 @@
 # Mọi file tải về sau khi bạn gõ nhãn sẽ nằm trong thư mục của nhãn đó.
 # """
 import asyncio, hashlib, json, re
-import os
 from pathlib import Path
+from types import SimpleNamespace
 from playwright.async_api import async_playwright
 
-START_URL = "https://ed22.engdis.com/ptithcm#/home"
+from ed_config import load_settings  # .env + tham số dòng lệnh (khóa học, bài cần lấy, tài khoản)
+
 OUT = Path("out/record")
 PROFILE = Path("browser_profile")
+
+HELP = """
+Cách chạy:  .\\get_data_flow.ps1 [--course I2|I3] [--targets "U02-L01..L03"] [--manual]
+Cấu hình nằm trong .env (xem .env.example): tài khoản, khai báo khóa học, khóa mặc định, bài cần lấy.
+Chế độ thủ công (ED_TARGETS để trống hoặc --manual), trong cửa sổ terminal:
+    gõ một nhãn + Enter   -> bắt đầu thư mục mới, vd:  I2-U02-L01-Be Careful
+    Enter (để trống)      -> chụp nội dung trang hiện tại (HTML + text của mọi iframe)
+    q + Enter             -> thoát
+"""
 
 SKIP_HOSTS = ("mixpanel", "mxpnl", "google", "gstatic", "doubleclick", "facebook", "clarity")
 AUDIO_VIDEO = (".mp3", ".mp4", ".m4a", ".wav", ".ogg", ".webm")
@@ -54,14 +69,14 @@ def flush():
     S.index[S.dir.name] = {"label": S.label, "files": len(S.log)}
     (OUT / "index.json").write_text(json.dumps(S.index, ensure_ascii=False, indent=1), "utf-8")
 
-async def auto_login(page):
-    user = os.environ.get("ED_USERNAME")
-    pwd = os.environ.get("ED_PASS")
-    print(f"[env] ED_USERNAME={user!r}, ED_PASS có {len(pwd) if pwd else 0} ký tự")
+
+async def auto_login(page, cfg):
+    user, pwd = cfg.username, cfg.password
     if not user or not pwd:
         print("Không có ED_USERNAME/ED_PASS, hãy đăng nhập tay.")
         return
     try:
+        # :visible để bỏ qua các ô password ẩn chống autofill của trang
         pw_input = page.locator("input[type=password]:visible").first
         await pw_input.wait_for(state="visible", timeout=10000)
     except Exception:
@@ -71,11 +86,57 @@ async def auto_login(page):
         "input[type=text]:visible, input[type=email]:visible, input:not([type]):visible").first
     await user_input.fill(user)
     await pw_input.fill(pwd)
-    await page.get_by_role("button", name="Login").click()
+    await page.get_by_role("button", name="Login", exact=True).click()
+
+    # Nếu tài khoản đang treo ở máy khác, web hiện popup "You are already logged in..."
+    # -> bấm "Login on This Device" (#btnOk) để đăng nhập lại trên máy này.
+    # Vòng lặp dừng ngay khi popup xuất hiện hoặc khi đã rời trang login.
+    await handle_already_logged_in(page)
+
     await page.wait_for_load_state("networkidle")
     print("Đã đăng nhập tự động.")
 
+
+async def handle_already_logged_in(page, timeout_ms=30000):
+    """Chờ popup 'You are already logged in...' rồi bấm 'Login on This Device'.
+    Dừng sớm nếu đã rời trang login (không có popup)."""
+    msg = page.get_by_text("You are already logged in").first
+    btn = page.get_by_role("button", name="Login on This Device").first
+    waited = 0
+    while waited < timeout_ms:
+        if await msg.is_visible():
+            print("Tài khoản đang đăng nhập ở thiết bị khác -> chiếm phiên trên máy này.")
+            await page.wait_for_timeout(500)  # chờ animation của popup xong
+            try:
+                await btn.click(timeout=3000)
+            except Exception as e:
+                print(f"   click thường lỗi ({type(e).__name__}), thử click bằng JS")
+                await page.evaluate("document.getElementById('btnOk').click()")
+            await page.wait_for_timeout(1000)
+            return True
+        if "login" not in page.url:
+            return False
+        await page.wait_for_timeout(300)
+        waited += 300
+    print("Không thấy popup 'already logged in' sau 30s (có thể đăng nhập sai hoặc mạng chậm).")
+    return False
+
+
+async def goto_course(page, cfg):
+    # chờ đăng nhập xong (URL không còn chứa "login") rồi mới chuyển khoá
+    try:
+        await page.wait_for_url(lambda u: "login" not in u, timeout=15000)
+    except Exception:
+        print("Cảnh báo: vẫn chưa thoát khỏi trang login, kiểm tra lại đăng nhập.")
+    url = cfg.course_url()
+    await page.goto(url)
+    await page.wait_for_load_state("networkidle")
+    print(f"Đã chuyển đến khoá {cfg.course}: {url}")
+
+
 async def main():
+    cfg = load_settings()
+    print(cfg.describe())
     OUT.mkdir(parents=True, exist_ok=True)
     async with async_playwright() as pw:
         ctx = await pw.chromium.launch_persistent_context(
@@ -185,11 +246,36 @@ async def main():
             flush()
             print(f"   📸 snap{S.snaps:02d}: {n} khung")
 
+        def start_label(label):
+            """Mở thư mục mới cho một nhãn (dùng chung cho chế độ thủ công và tự động)."""
+            S.seq += 1
+            S.label = label
+            S.dir = OUT / f"{S.seq:03d}_{slug(label)}"
+            S.dir.mkdir(parents=True, exist_ok=True)
+            S.seen, S.log, S.reqs, S.snaps = set(), [], [], 0
+            print(f"   → thư mục: {S.dir}")
+            return S.dir
+
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        await page.goto(START_URL)
-        await auto_login(page)
-        print(__doc__)
-        print("Đăng nhập nếu cần, rồi cứ thao tác bình thường. Nhớ gõ nhãn trước khi mở mỗi bài.\n")
+        await page.goto(cfg.home_url)
+        await auto_login(page, cfg)
+        if cfg.course:
+            await goto_course(page, cfg)
+
+        if cfg.mode == "auto":  # móc nối sang ed_operation.py (module thao tác bài học - viết ở bước sau)
+            try:
+                from ed_operation import run_auto
+            except ImportError:
+                print("Chế độ tự động cần ed_operation.py (chưa có) -> chuyển sang chế độ thủ công.")
+            else:
+                rec = SimpleNamespace(start_label=start_label, snapshot=snapshot, flush=flush, state=S)
+                await run_auto(ctx, page, cfg, rec)
+                flush()
+                await ctx.close()
+                return
+
+        print(HELP)
+        print("Cứ thao tác bình thường. Nhớ gõ nhãn trước khi mở mỗi bài.\n")
 
         while True:
             cmd = (await asyncio.to_thread(input, "> ")).strip()
@@ -200,12 +286,7 @@ async def main():
                 continue
             if S.dir is not None:
                 await snapshot()  # tự chụp nốt trạng thái cuối của nhãn trước
-            S.seq += 1
-            S.label = cmd
-            S.dir = OUT / f"{S.seq:03d}_{slug(cmd)}"
-            S.dir.mkdir(parents=True, exist_ok=True)
-            S.seen, S.log, S.reqs, S.snaps = set(), [], [], 0
-            print(f"   → thư mục: {S.dir}")
+            start_label(cmd)
 
         if S.dir is not None:
             await snapshot()
