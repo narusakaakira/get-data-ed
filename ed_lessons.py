@@ -32,6 +32,7 @@ GETITEM = re.compile(r"GetItem/(\d+)/([A-Za-z0-9_]+)/(\d+)/(\d+)/(\d+)")
 CODE = re.compile(r"^(.*?)([pt])(\d+)$")
 TAG = re.compile(r"<[^>]+>")
 BLOCK = re.compile(r"(?i)<\s*br\s*/?\s*>|</?\s*(?:p|div|li|tr|h\d)\b[^>]*>")
+BLANK_RE = re.compile(r"<BLANK(?:\s+NUM=(\d+))?\s*/?>", re.IGNORECASE)
 STR = re.compile(r'"((?:[^"\\\n]|\\.){25,})"|\'((?:[^\'\\\n]|\\.){25,})\'')
 HON = r"(?:Dr|Mr|Mrs|Ms|Prof)\."
 NAME_TOK = rf"(?:{HON}|[A-Z][A-Za-z'’\-]*)"
@@ -45,9 +46,21 @@ ABBR = {"mr", "mrs", "ms", "dr", "prof", "st", "jr", "sr", "vs", "etc", "no"}
 # ---------- văn bản ----------
 def clean_text(s):
     s = BLOCK.sub("\n", str(s))
+    if "<BLANK" in str(s).upper():
+        matches = BLANK_RE.findall(s)
+        total = len(matches)
+        if total > 0:
+            counter = 0
+            def _sub(m):
+                nonlocal counter
+                counter += 1
+                num = m.group(1) or str(counter)
+                return " _______ " if total == 1 else f" [Ô {num}] "
+            s = BLANK_RE.sub(_sub, s)
     s = html.unescape(TAG.sub("", s)).replace("\xa0", " ")
     s = re.sub(r"\\(['\"/\\])", r"\1", s)
     s = re.sub(r"[ \t]+", " ", s)
+    s = re.sub(r"\s+([,.:;?!])", r"\1", s)
     return re.sub(r"\n\s*\n+", "\n", s).strip()
 
 

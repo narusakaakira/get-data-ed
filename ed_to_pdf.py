@@ -38,6 +38,7 @@ FONTS = [  # (thường, đậm) - cần font hỗ trợ tiếng Việt
 GETITEM = re.compile(r"GetItem/(\d+)/([A-Za-z0-9_]+)/(\d+)/(\d+)/(\d+)")
 CODE = re.compile(r"^(.*?)([pt])(\d+)$")
 TAG = re.compile(r"<[^>]+>")
+BLANK_RE = re.compile(r"<BLANK(?:\s+NUM=(\d+))?\s*/?>", re.IGNORECASE)
 STR = re.compile(r'"((?:[^"\\\n]|\\.){25,})"|\'((?:[^\'\\\n]|\\.){25,})\'')
 
 
@@ -52,7 +53,20 @@ def setup_fonts():
 
 
 def clean(s):
-    return html.unescape(TAG.sub("", str(s))).replace("\xa0", " ").strip()
+    s = str(s)
+    if "<BLANK" in s.upper():
+        matches = BLANK_RE.findall(s)
+        total = len(matches)
+        if total > 0:
+            counter = 0
+            def _sub(m):
+                nonlocal counter
+                counter += 1
+                num = m.group(1) or str(counter)
+                return " _______ " if total == 1 else f" [Ô {num}] "
+            s = BLANK_RE.sub(_sub, s)
+    s = html.unescape(TAG.sub("", s)).replace("\xa0", " ").strip()
+    return re.sub(r"\s+([,.:;?!])", r"\1", s)
 
 
 def esc(s):
